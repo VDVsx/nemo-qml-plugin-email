@@ -8,11 +8,16 @@
  */
 
 #include "emailfolder.h"
+#include "emailagent.h"
+
+#include <qmailstore.h>
 
 EmailFolder::EmailFolder(QObject *parent) :
     QObject(parent)
   , m_folder(QMailFolder())
 {
+    connect(QMailStore::instance(), SIGNAL(foldersUpdated(const QMailFolderIdList &)), this,
+                          SLOT(onFoldersUpdated(const QMailFolderIdList &)));
 }
 
 EmailFolder::~EmailFolder()
@@ -36,7 +41,7 @@ int EmailFolder::parentAccountId() const
 
 int EmailFolder::parentFolderId() const
 {
-    return m_folder.parentAccountId().toULongLong();
+    return m_folder.parentFolderId().toULongLong();
 }
 
 QString EmailFolder::path() const
@@ -59,6 +64,12 @@ int EmailFolder::serverUnreadCount() const
     return m_folder.serverUnreadCount();
 }
 
+void EmailFolder::setDisplayName(const QString &displayName)
+{
+    m_folder.setDisplayName(displayName);
+    emit displayNameChanged();
+}
+
 void EmailFolder::setFolderId(int folderId)
 {
     QMailFolderId foldId(folderId);
@@ -67,10 +78,20 @@ void EmailFolder::setFolderId(int folderId)
             m_folder = QMailFolder(foldId);
         } else {
             m_folder = QMailFolder();
-            qWarning() << "Invalid folder id " << foldId.toULongLong();
+            qCWarning(lcGeneral) << "Invalid folder id " << foldId.toULongLong();
         }
 
         // Folder loaded from the store (or a empty folder), all properties changes
         emit folderIdChanged();
+    }
+}
+
+void EmailFolder::onFoldersUpdated(const QMailFolderIdList &ids)
+{
+    foreach (QMailFolderId folderId, ids) {
+        if (folderId == m_folder.id()) {
+            emit displayNameChanged();
+            return;
+        }
     }
 }

@@ -1,6 +1,6 @@
 /*
  * Copyright 2011 Intel Corporation.
- * Copyright (C) 2012 Jolla Ltd.
+ * Copyright (C) 2012-2014 Jolla Ltd.
  *
  * This program is licensed under the terms and conditions of the
  * Apache License, version 2.0.  The full text of the Apache License is at 	
@@ -12,9 +12,11 @@
 #include <qmailnamespace.h>
 
 #include "emailaccountlistmodel.h"
+#include "emailagent.h"
 
 EmailAccountListModel::EmailAccountListModel(QObject *parent) :
-    QMailAccountListModel(parent)
+    QMailAccountListModel(parent),
+    m_hasPersistentConnection(false)
 {
     roles.insert(DisplayName, "displayName");
     roles.insert(EmailAddress, "emailAddress");
@@ -24,31 +26,64 @@ EmailAccountListModel::EmailAccountListModel(QObject *parent) :
     roles.insert(LastSynchronized, "lastSynchronized");
     roles.insert(StandardFoldersRetrieved, "standardFoldersRetrieved");
     roles.insert(Signature, "signature");
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-    setRoleNames(roles);
-#endif
+    roles.insert(AppendSignature, "appendSignature");
+    roles.insert(IconPath, "iconPath");
+    roles.insert(HasPersistentConnection, "hasPersistentConnection");
 
-    connect (QMailStore::instance(), SIGNAL(accountsAdded(const QMailAccountIdList &)), this,
-             SLOT(onAccountsAdded (const QMailAccountIdList &)));
-    connect (QMailStore::instance(), SIGNAL(accountsRemoved(const QMailAccountIdList &)), this,
-             SLOT(onAccountsRemoved(const QMailAccountIdList &)));
-    connect (QMailStore::instance(), SIGNAL(accountsUpdated(const QMailAccountIdList &)), this,
-             SLOT(onAccountsUpdated(const QMailAccountIdList &)));
+    connect(this, SIGNAL(rowsInserted(QModelIndex,int,int)),
+            this,SLOT(onAccountsAdded(QModelIndex,int,int)));
+    connect(this, SIGNAL(rowsRemoved(QModelIndex,int,int)),
+            this,SLOT(onAccountsRemoved(QModelIndex,int,int)));
+    connect(QMailStore::instance(), SIGNAL(accountContentsModified(const QMailAccountIdList&)),
+            this, SLOT(onAccountContentsModified(const QMailAccountIdList&)));
+    connect(QMailStore::instance(), SIGNAL(accountsUpdated(const QMailAccountIdList&)),
+            this, SLOT(onAccountsUpdated(const QMailAccountIdList&)));
 
     QMailAccountListModel::setSynchronizeEnabled(true);
-    QMailAccountListModel::setKey(QMailAccountKey::messageType(QMailMessage::Email));
+    QMailAccountListModel::setKey(QMailAccountKey::status(QMailAccount::Enabled));
+    m_canTransmitAccounts = false;
+
+    for (int row = 0; row < rowCount(); row++) {
+        if ((data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime() > m_lastUpdateTime) {
+            m_lastUpdateTime = (data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime();
+        }
+
+        QMailAccountId accountId(data(index(row), EmailAccountListModel::MailAccountId).toInt());
+        m_unreadCountCache.insert(accountId, accountUnreadCount(accountId));
+
+        // Check if any account has a persistent connection to the server(always online)
+        if (!m_hasPersistentConnection && (data(index(row), EmailAccountListModel::HasPersistentConnection)).toBool()) {
+            m_hasPersistentConnection = true;
+        }
+    }
 }
 
 EmailAccountListModel::~EmailAccountListModel()
 {
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+int EmailAccountListModel::accountUnreadCount(const QMailAccountId accountId)
+{
+    QMailFolderKey key = QMailFolderKey::parentAccountId(accountId);
+    QMailFolderSortKey sortKey = QMailFolderSortKey::serverCount(Qt::DescendingOrder);
+    QMailFolderIdList folderIds = QMailStore::instance()->queryFolders(key, sortKey);
+
+    QMailMessageKey accountKey(QMailMessageKey::parentAccountId(accountId));
+    QMailMessageKey folderKey(QMailMessageKey::parentFolderId(folderIds));
+    QMailMessageKey unreadKey(QMailMessageKey::status(QMailMessage::Read, QMailDataComparator::Excludes) &
+                              QMailMessageKey::status(QMailMessage::Trash, QMailDataComparator::Excludes) &
+                              QMailMessageKey::status(QMailMessage::Removed, QMailDataComparator::Excludes) &
+                              QMailMessageKey::status(QMailMessage::Junk, QMailDataComparator::Excludes) &
+                              QMailMessageKey::status(QMailMessage::Outgoing, QMailDataComparator::Excludes) &
+                              QMailMessageKey::status(QMailMessage::Sent, QMailDataComparator::Excludes) &
+                              QMailMessageKey::status(QMailMessage::Draft, QMailDataComparator::Excludes));
+    return (QMailStore::instance()->countMessages(accountKey & folderKey & unreadKey));
+}
+
 QHash<int, QByteArray> EmailAccountListModel::roleNames() const
 {
     return roles;
 }
-#endif
 
 QVariant EmailAccountListModel::data(const QModelIndex &index, int role) const
 {
@@ -66,14 +101,7 @@ QVariant EmailAccountListModel::data(const QModelIndex &index, int role) const
     }
 
     if (role == UnreadCount) {
-        QMailFolderKey key = QMailFolderKey::parentAccountId(accountId);
-        QMailFolderSortKey sortKey = QMailFolderSortKey::serverCount(Qt::DescendingOrder);
-        QMailFolderIdList folderIds = QMailStore::instance()->queryFolders(key, sortKey);
-
-        QMailMessageKey accountKey(QMailMessageKey::parentAccountId(accountId));
-        QMailMessageKey folderKey(QMailMessageKey::parentFolderId(folderIds));
-        QMailMessageKey unreadKey(QMailMessageKey::status(QMailMessage::Read, QMailDataComparator::Excludes));
-        return (QMailStore::instance()->countMessages(accountKey & folderKey & unreadKey));
+        return m_unreadCountCache.value(accountId);
     }
 
     QMailAccount account(accountId);
@@ -102,11 +130,35 @@ QVariant EmailAccountListModel::data(const QModelIndex &index, int role) const
 
     if (role == StandardFoldersRetrieved) {
         quint64 standardFoldersMask = QMailAccount::statusMask("StandardFoldersRetrieved");
-        return account.status() & standardFoldersMask;
+        if (account.status() & standardFoldersMask) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     if (role == Signature) {
         return account.signature();
+    }
+
+    if (role == AppendSignature) {
+        if (account.status() & QMailAccount::AppendSignature) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    if (role == IconPath) {
+        return account.iconPath();
+    }
+
+    if (role == HasPersistentConnection) {
+        if (account.status() & QMailAccount::HasPersistentConnection) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     return QVariant();
@@ -116,45 +168,153 @@ int EmailAccountListModel::rowCount(const QModelIndex &parent) const
 {
     return QMailAccountListModel::rowCount(parent);
 }
+
 // ############ Slots ##############
-void EmailAccountListModel::onAccountsAdded(const QMailAccountIdList &ids)
+void EmailAccountListModel::onAccountsAdded(const QModelIndex &parent, int start, int end)
 {
-    QMailAccountListModel::beginResetModel();
-    QMailAccountListModel::endResetModel();
-    QVariantList accountIds;
-    foreach (QMailAccountId accountId, ids) {
-        accountIds.append(accountId.toULongLong());
+    Q_UNUSED(parent);
+    bool updateTimeChanged = false;
+
+    for (int i = start; i < end; i++) {
+        QMailAccountId accountId(data(index(i), EmailAccountListModel::MailAccountId).toInt());
+        m_unreadCountCache.insert(accountId, accountUnreadCount(accountId));
+        dataChanged(index(i), index(i), QVector<int>() << UnreadCount);
+
+        if ((data(index(i), EmailAccountListModel::LastSynchronized)).toDateTime() > m_lastUpdateTime) {
+            updateTimeChanged = true;
+            m_lastUpdateTime = (data(index(i), EmailAccountListModel::LastSynchronized)).toDateTime();
+        }
+
+        // Check if any of the new accounts has a persistent connection to the server(always online)
+        if (!m_hasPersistentConnection && (data(index(i), EmailAccountListModel::HasPersistentConnection)).toBool()) {
+            m_hasPersistentConnection = true;
+            emit hasPersistentConnectionChanged();
+        }
     }
-    emit accountsAdded(accountIds);
+
+    emit accountsAdded();
+    emit numberOfAccountsChanged();
+
+    if (updateTimeChanged) {
+        emit lastUpdateTimeChanged();
+    }
+}
+
+void EmailAccountListModel::onAccountsRemoved(const QModelIndex &parent, int start, int end)
+{
+    Q_UNUSED(parent);
+    Q_UNUSED(start);
+    Q_UNUSED(end);
+
+    if (rowCount()) {
+        m_lastUpdateTime = QDateTime();
+        bool hadPersistentConnection = m_hasPersistentConnection;
+        m_hasPersistentConnection = false;
+        for (int row = 0; row < rowCount(); row++) {
+            if ((data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime() > m_lastUpdateTime) {
+                m_lastUpdateTime = (data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime();
+            }
+            // Check if any of the remaining accounts has a persistent connection to the server(always online)
+            if (!m_hasPersistentConnection && (data(index(row), EmailAccountListModel::HasPersistentConnection)).toBool()) {
+                m_hasPersistentConnection = true;
+            }
+        }
+
+        if (hadPersistentConnection != m_hasPersistentConnection) {
+            qCDebug(lcDebug) << Q_FUNC_INFO << "HasPersistentConnection changed to " << m_hasPersistentConnection;
+            emit hasPersistentConnectionChanged();
+        }
+
+        emit lastUpdateTimeChanged();
+    }
+
+    emit accountsRemoved();
     emit numberOfAccountsChanged();
 }
 
-void EmailAccountListModel::onAccountsRemoved(const QMailAccountIdList &ids)
+void EmailAccountListModel::onAccountContentsModified(const QMailAccountIdList &ids)
 {
-    QMailAccountListModel::beginResetModel();
-    QMailAccountListModel::endResetModel();
-    QVariantList accountIds;
-    foreach (QMailAccountId accountId, ids) {
-        accountIds.append(accountId.toULongLong());
+    int count = numberOfAccounts();
+    for (int i = 0; i < count; ++i) {
+        QMailAccountId tmpAccountId(accountId(i));
+        if (ids.contains(tmpAccountId)) {
+            m_unreadCountCache.insert(tmpAccountId, accountUnreadCount(tmpAccountId));
+            dataChanged(index(i), index(i), QVector<int>() << UnreadCount);
+        }
     }
-    emit accountsRemoved(accountIds);
-    emit numberOfAccountsChanged();
 }
 
 void EmailAccountListModel::onAccountsUpdated(const QMailAccountIdList &ids)
 {
-    QMailAccountListModel::beginResetModel();
-    QMailAccountListModel::endResetModel();
-    QVariantList accountIds;
-    foreach (QMailAccountId accountId, ids) {
-        accountIds.append(accountId.toULongLong());
+    int count = numberOfAccounts();
+    QVector<int> roles;
+    roles << HasPersistentConnection << LastSynchronized;
+    for (int i = 0; i < count; ++i) {
+        QMailAccountId tmpAccountId(accountId(i));
+        if (ids.contains(tmpAccountId)) {
+            dataChanged(index(i), index(i), roles);
+        }
     }
-    emit accountsUpdated(accountIds);
+
+    // Global lastSyncTime and persistent connection(all accounts)
+    bool emitSignal = false;
+    bool hadPersistentConnection = m_hasPersistentConnection;
+    m_hasPersistentConnection = false;
+    for (int row = 0; row < rowCount(); row++) {
+        if ((data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime() > m_lastUpdateTime) {
+            emitSignal = true;
+            m_lastUpdateTime = (data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime();
+        }
+
+        // Check if any account has a persistent connection to the server(always online)
+        if (!m_hasPersistentConnection && (data(index(row), EmailAccountListModel::HasPersistentConnection)).toBool()) {
+            m_hasPersistentConnection = true;
+        }
+    }
+
+    if (hadPersistentConnection != m_hasPersistentConnection) {
+        qCDebug(lcDebug) << Q_FUNC_INFO << "HasPersistentConnection changed to " << m_hasPersistentConnection;
+        emit hasPersistentConnectionChanged();
+    }
+
+    if (emitSignal) {
+        emit lastUpdateTimeChanged();
+    }
 }
 
 int EmailAccountListModel::numberOfAccounts() const
 {
     return rowCount();
+}
+
+QDateTime EmailAccountListModel::lastUpdateTime() const
+{
+    return m_lastUpdateTime;
+}
+
+bool EmailAccountListModel::canTransmitAccounts() const
+{
+    return m_canTransmitAccounts;
+}
+
+void EmailAccountListModel::setCanTransmitAccounts(bool value)
+{
+    if (value != m_canTransmitAccounts) {
+        if (value) {
+            QMailAccountKey transmitKey = QMailAccountKey::status(QMailAccount::Enabled)  &
+                    QMailAccountKey::status(QMailAccount::CanTransmit);
+            QMailAccountListModel::setKey(transmitKey);
+        } else {
+            QMailAccountListModel::setKey(QMailAccountKey::status(QMailAccount::Enabled));
+        }
+        emit numberOfAccountsChanged();
+        emit canTransmitAccountsChanged();
+    }
+}
+
+bool EmailAccountListModel::hasPersistentConnection() const
+{
+    return m_hasPersistentConnection;
 }
 
 // ########### Invokable API ###################
@@ -182,6 +342,27 @@ QStringList EmailAccountListModel::allEmailAddresses()
         emailAddressList << emailAddress;
     }
     return emailAddressList;
+}
+
+QString EmailAccountListModel::customField(QString name, int idx) const
+{
+    int accountId = data(index(idx), EmailAccountListModel::MailAccountId).toInt();
+
+    if (accountId) {
+        return customFieldFromAccountId(name, accountId);
+    } else {
+        return QString();
+    }
+}
+
+QString EmailAccountListModel::customFieldFromAccountId(QString name, int accountId) const
+{
+    QMailAccountId acctId(accountId);
+    if (acctId.isValid()) {
+        QMailAccount account(acctId);
+        return account.customField(name);
+    }
+    return QString();
 }
 
 QString EmailAccountListModel::displayName(int idx)
@@ -228,17 +409,27 @@ int EmailAccountListModel::indexFromAccountId(int id)
     return -1;
 }
 
-QDateTime EmailAccountListModel::lastUpdatedAccountTime()
-{
-    QDateTime lastUpdatedAccTime;
-    for (int row = 0; row < rowCount(); row++) {
-        if ((data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime() > lastUpdatedAccTime)
-            lastUpdatedAccTime = (data(index(row), EmailAccountListModel::LastSynchronized)).toDateTime();
-    }
-    return lastUpdatedAccTime;
-}
-
 bool EmailAccountListModel::standardFoldersRetrieved(int idx)
 {
     return data(index(idx), EmailAccountListModel::StandardFoldersRetrieved).toBool();
+}
+
+bool EmailAccountListModel::appendSignature(int accountId)
+{
+    int accountIndex = indexFromAccountId(accountId);
+
+    if (accountIndex < 0)
+        return false;
+
+    return data(index(accountIndex), EmailAccountListModel::AppendSignature).toBool();
+}
+
+QString EmailAccountListModel::signature(int accountId)
+{
+    int accountIndex = indexFromAccountId(accountId);
+
+    if (accountIndex < 0)
+        return QString();
+
+    return data(index(accountIndex), EmailAccountListModel::Signature).toString();
 }

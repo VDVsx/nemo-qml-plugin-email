@@ -1,6 +1,6 @@
-Name:       nemo-qml-plugin-email-qt5
-Summary:    Email plugin for Nemo Mobile
-Version:    0.1.70
+Name:       nemo-qml-plugin-email-qt5-offline
+Summary:    Offline email plugin for Nemo Mobile
+Version:    0.1.41
 Release:    1
 Group:      System/Libraries
 License:    BSD
@@ -13,12 +13,11 @@ BuildRequires:  pkgconfig(Qt5Gui)
 BuildRequires:  pkgconfig(Qt5Qml)
 BuildRequires:  pkgconfig(Qt5Network)
 BuildRequires:  pkgconfig(Qt5Test)
-BuildRequires:  pkgconfig(mlocale5)
-BuildRequires:  pkgconfig(qmfmessageserver5)
 BuildRequires:  pkgconfig(qmfclient5)
-Requires:  libqmfmessageserver1-qt5 >= 4.0.4+git50
-Requires:  libqmfclient1-qt5 >= 4.0.4+git50
-Conflicts: nemo-qml-plugin-email-qt5-offline
+BuildRequires:  pkgconfig(qmfmessageserver5)
+BuildRequires:  pkgconfig(mlocale5)
+Conflicts: nemo-qml-plugin-email-qt5
+Provides: nemo-qml-plugin-email-qt5
 
 %description
 %{summary}.
@@ -34,7 +33,6 @@ Requires:   %{name} = %{version}-%{release}
 %package tests
 Summary:    QML email plugin tests
 Group:      System/Libraries
-Requires:   qmf-qt5-tests >= 4.0.4+git16
 Requires:   %{name} = %{version}-%{release}
 
 %description tests
@@ -43,13 +41,28 @@ Requires:   %{name} = %{version}-%{release}
 %prep
 %setup -q -n %{name}-%{version}
 
+# >> setup
+# << setup
+
 %build
-%qmake5 
+# >> build pre
+# << build pre
+echo "DEFINES+=OFFLINE" > .qmake.conf
+%qmake5 DEFINES+=OFFLINE
+
 make %{?_smp_mflags}
+
+# >> build post
+# << build post
 
 %install
 rm -rf %{buildroot}
+# >> install pre
+# << install pre
 %qmake5_install
+
+# >> install post
+# << install post
 
 %post -p /sbin/ldconfig
 
@@ -62,6 +75,8 @@ rm -rf %{buildroot}
 %{_libdir}/qt5/qml/org/nemomobile/email/qmldir
 %{_sysconfdir}/xdg/nemo-qml-plugin-email/domainSettings.conf
 %{_sysconfdir}/xdg/nemo-qml-plugin-email/serviceSettings.conf
+# >> files
+# << files
 
 %files devel
 %defattr(-,root,root,-)
@@ -69,7 +84,11 @@ rm -rf %{buildroot}
 %{_libdir}/libnemoemail-qt5.prl
 %{_includedir}/nemoemail-qt5/*.h
 %{_libdir}/pkgconfig/nemoemail-qt5.pc
+# >> files devel
+# << files devel
 
 %files tests
 %defattr(-,root,root,-)
 /opt/tests/nemo-qml-plugins/email/*
+# >> files tests
+# << files tests

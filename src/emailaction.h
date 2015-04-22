@@ -12,8 +12,9 @@
 
 #include <QObject>
 #include <qmailserviceaction.h>
+#include <qmailserviceaction.h>
 
-class EmailAction : public QObject
+class Q_DECL_EXPORT EmailAction : public QObject
 {
      Q_OBJECT
 
@@ -22,6 +23,9 @@ public:
         Export = 0,
         Retrieve,
         RetrieveFolderList,
+        RetrieveMessages,
+        RetrieveMessagePart,
+        Search,
         Send,
         StandardFolders,
         Storage,
@@ -33,10 +37,12 @@ public:
     virtual QMailAccountId accountId() const;
     virtual QMailServiceAction* serviceAction() const = 0;
     bool operator==(const EmailAction &action) const;
+    bool operator!=(const EmailAction &action) const;
     QString description() const;
     ActionType type() const;
     quint64 id() const;
     void setId(const quint64 id);
+    bool needsNetworkConnection() const { return _onlineAction; }
 
 protected:
     EmailAction(bool onlineAction = true);
@@ -47,7 +53,6 @@ protected:
 
 private:
     bool _onlineAction;
-    bool needsNetworkConnection() const { return _onlineAction; }
 };
 
 class CreateStandardFolders : public EmailAction
@@ -84,6 +89,7 @@ public:
     ~ExportUpdates();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
@@ -144,6 +150,7 @@ public:
     ~OnlineCreateFolder();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailStorageAction* _storageAction;
@@ -155,10 +162,12 @@ private:
 class OnlineDeleteFolder : public EmailAction
 {
 public:
-    OnlineDeleteFolder(QMailStorageAction *storageAction, const QMailFolderId &folderId);
+    OnlineDeleteFolder(QMailStorageAction *storageAction,
+                       const QMailFolderId &folderId);
     ~OnlineDeleteFolder();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailStorageAction* _storageAction;
@@ -183,10 +192,12 @@ private:
 class OnlineRenameFolder : public EmailAction
 {
 public:
-    OnlineRenameFolder(QMailStorageAction *storageAction, const QMailFolderId &folderId, const QString &name);
+    OnlineRenameFolder(QMailStorageAction *storageAction,
+                       const QMailFolderId &folderId, const QString &name);
     ~OnlineRenameFolder();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailStorageAction* _storageAction;
@@ -220,6 +231,7 @@ public:
     ~RetrieveMessageList();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
@@ -238,6 +250,7 @@ public:
     ~RetrieveMessageLists();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
@@ -251,14 +264,20 @@ class RetrieveMessagePart : public EmailAction
 {
 public:
     RetrieveMessagePart(QMailRetrievalAction* retrievalAction,
-                        const QMailMessagePart::Location &partLocation);
+                        const QMailMessagePart::Location &partLocation, bool isAttachment);
     ~RetrieveMessagePart();
     void execute();
+    QMailMessageId messageId() const;
     QMailServiceAction* serviceAction() const;
+    QString partLocation() const;
+    bool isAttachment() const;
+    QMailAccountId accountId() const;
 
 private:
+    QMailMessageId _messageId;
     QMailRetrievalAction* _retrievalAction;
     QMailMessagePart::Location _partLocation;
+    bool _isAttachment;
 };
 
 class RetrieveMessagePartRange : public EmailAction
@@ -269,6 +288,7 @@ public:
     ~RetrieveMessagePartRange();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
@@ -284,6 +304,7 @@ public:
     ~RetrieveMessageRange();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
@@ -300,11 +321,35 @@ public:
     ~RetrieveMessages();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailMessageIdList messageIds() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
     QMailMessageIdList _messageIds;
     QMailRetrievalAction::RetrievalSpecification _spec;
+};
+
+class SearchMessages : public EmailAction
+{
+public:
+    SearchMessages(QMailSearchAction* searchAction,
+                   const QMailMessageKey &filter,
+                   const QString &bodyText, QMailSearchAction::SearchSpecification spec,
+                   quint64 limit, bool searchBody = true, const QMailMessageSortKey &sort = QMailMessageSortKey());
+    ~SearchMessages();
+    void execute();
+    QMailServiceAction* serviceAction() const;
+    bool isRemote() const;
+    QString searchText() const;
+
+private:
+    QMailSearchAction *_searchAction;
+    QMailMessageKey _filter;
+    QString _bodyText;
+    QMailSearchAction::SearchSpecification _spec;
+    quint64 _limit;
+    QMailMessageSortKey _sort;
+    bool _searchBody;
 };
 
 class Synchronize : public EmailAction
@@ -314,10 +359,26 @@ public:
     ~Synchronize();
     void execute();
     QMailServiceAction* serviceAction() const;
+    QMailAccountId accountId() const;
 
 private:
     QMailRetrievalAction* _retrievalAction;
     QMailAccountId _accountId;
+};
+
+class TransmitMessage : public EmailAction
+{
+public:
+    TransmitMessage(QMailTransmitAction* transmitAction, const QMailMessageId& messageId);
+    ~TransmitMessage();
+    void execute();
+    QMailServiceAction* serviceAction() const;
+    QMailMessageId messageId() const;
+    QMailAccountId accountId() const;
+
+private:
+    QMailTransmitAction* _transmitAction;
+    QMailMessageId _messageId;
 };
 
 class TransmitMessages : public EmailAction

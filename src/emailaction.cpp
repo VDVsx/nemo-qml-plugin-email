@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Jolla Ltd.
+ * Copyright (C) 2013-2015 Jolla Ltd.
  * Contact: Valerio Valerio <valerio.valerio@jollamobile.com>
  *
  * This program is licensed under the terms and conditions of the
@@ -31,7 +31,10 @@ QString idListToString(const QList<T> &ids)
   EmailAction
 */
 EmailAction::EmailAction(bool onlineAction)
-    : _onlineAction(onlineAction)
+    : _description(QString())
+    , _type(Export)
+    , _id(0)
+    , _onlineAction(onlineAction)
 {
 }
 
@@ -53,6 +56,15 @@ bool EmailAction::operator==(const EmailAction &action) const
         return true;
     }
     else {
+        return false;
+    }
+}
+
+bool EmailAction::operator!=(const EmailAction &action) const
+{
+    if (action._description != _description) {
+        return true;
+    } else {
         return false;
     }
 }
@@ -112,7 +124,7 @@ QMailAccountId CreateStandardFolders::accountId() const
   DeleteMessages
 */
 DeleteMessages::DeleteMessages(QMailStorageAction* storageAction, const QMailMessageIdList &ids)
-    : EmailAction()
+    : EmailAction(false)
     , _storageAction(storageAction)
     , _ids(ids)
 {
@@ -161,12 +173,17 @@ QMailServiceAction* ExportUpdates::serviceAction() const
     return _retrievalAction;
 }
 
+QMailAccountId ExportUpdates::accountId() const
+{
+    return _accountId;
+}
+
 /*
   FlagMessages
 */
 FlagMessages::FlagMessages(QMailStorageAction* storageAction, const QMailMessageIdList &ids,
                            quint64 setMask, quint64 unsetMask)
-    : EmailAction()
+    : EmailAction(false)
     , _storageAction(storageAction)
     , _ids(ids)
     , _setMask(setMask)
@@ -195,10 +212,9 @@ QMailServiceAction* FlagMessages::serviceAction() const
 /*
     MoveToFolder
 */
-
 MoveToFolder::MoveToFolder(QMailStorageAction *storageAction, const QMailMessageIdList &ids,
                            const QMailFolderId &folderId)
-    : EmailAction()
+    : EmailAction(false)
     , _storageAction(storageAction)
     , _ids(ids)
     , _destinationFolder(folderId)
@@ -224,11 +240,11 @@ QMailServiceAction* MoveToFolder::serviceAction() const
 }
 
 /*
-  MoveToStandardFolder
+   MoveToStandardFolder
 */
 MoveToStandardFolder::MoveToStandardFolder(QMailStorageAction *storageAction,
                                            const QMailMessageIdList &ids, QMailFolder::StandardFolder standardFolder)
-    : EmailAction()
+    : EmailAction(false)
     , _storageAction(storageAction)
     , _ids(ids)
     , _standardFolder(standardFolder)
@@ -256,8 +272,8 @@ QMailServiceAction* MoveToStandardFolder::serviceAction() const
 /*
   OnlineCreateFolder
 */
-OnlineCreateFolder::OnlineCreateFolder(QMailStorageAction* storageAction, const QString &name
-                                       , const QMailAccountId &id, const QMailFolderId &parentId)
+OnlineCreateFolder::OnlineCreateFolder(QMailStorageAction* storageAction, const QString &name,
+                                       const QMailAccountId &id, const QMailFolderId &parentId)
     : EmailAction()
     , _storageAction(storageAction)
     , _name(name)
@@ -290,6 +306,11 @@ QMailServiceAction* OnlineCreateFolder::serviceAction() const
     return _storageAction;
 }
 
+QMailAccountId OnlineCreateFolder::accountId() const
+{
+    return _accountId;
+}
+
 /*
   OnlineDeleteFolder
 */
@@ -314,6 +335,12 @@ void OnlineDeleteFolder::execute()
 QMailServiceAction* OnlineDeleteFolder::serviceAction() const
 {
     return _storageAction;
+}
+
+QMailAccountId OnlineDeleteFolder::accountId() const
+{
+    QMailFolder folder(_folderId);
+    return folder.parentAccountId();
 }
 
 /*
@@ -373,6 +400,12 @@ QMailServiceAction* OnlineRenameFolder::serviceAction() const
     return _storageAction;
 }
 
+QMailAccountId OnlineRenameFolder::accountId() const
+{
+    QMailFolder folder(_folderId);
+    return folder.parentAccountId();
+}
+
 /*
   RetrieveFolderList
 */
@@ -416,7 +449,6 @@ QMailAccountId RetrieveFolderList::accountId() const
     return _accountId;
 }
 
-
 /*
   RetrieveMessageList
 */
@@ -447,6 +479,11 @@ void RetrieveMessageList::execute()
 QMailServiceAction* RetrieveMessageList::serviceAction() const
 {
     return _retrievalAction;
+}
+
+QMailAccountId RetrieveMessageList::accountId() const
+{
+    return _accountId;
 }
 
 /*
@@ -482,18 +519,26 @@ QMailServiceAction* RetrieveMessageLists::serviceAction() const
     return _retrievalAction;
 }
 
+QMailAccountId RetrieveMessageLists::accountId() const
+{
+    return _accountId;
+}
+
 /*
   RetrieveMessagePart
 */
 RetrieveMessagePart::RetrieveMessagePart(QMailRetrievalAction *retrievalAction,
-                                         const QMailMessagePartContainer::Location &partLocation)
+                                         const QMailMessagePartContainer::Location &partLocation,
+                                         bool isAttachment)
     : EmailAction()
+    , _messageId(partLocation.containingMessageId())
     , _retrievalAction(retrievalAction)
     , _partLocation(partLocation)
+    , _isAttachment(isAttachment)
 {
     _description = QString("retrieve-message-part:partLocation-id=%1")
             .arg(_partLocation.toString(true));
-    _type = EmailAction::Retrieve;
+    _type = EmailAction::RetrieveMessagePart;
 }
 
 RetrieveMessagePart::~RetrieveMessagePart()
@@ -505,9 +550,30 @@ void RetrieveMessagePart::execute()
      _retrievalAction->retrieveMessagePart(_partLocation);
 }
 
+QMailMessageId RetrieveMessagePart::messageId() const
+{
+    return _messageId;
+}
+
+QString RetrieveMessagePart::partLocation() const
+{
+    return _partLocation.toString(true);
+}
+
 QMailServiceAction* RetrieveMessagePart::serviceAction() const
 {
     return _retrievalAction;
+}
+
+bool RetrieveMessagePart::isAttachment() const
+{
+    return _isAttachment;
+}
+
+QMailAccountId RetrieveMessagePart::accountId() const
+{
+    QMailMessage message(_messageId);
+    return message.parentAccountId();
 }
 
 /*
@@ -540,6 +606,12 @@ QMailServiceAction* RetrieveMessagePartRange::serviceAction() const
     return _retrievalAction;
 }
 
+QMailAccountId RetrieveMessagePartRange::accountId() const
+{
+    QMailMessage message(_partLocation.containingMessageId());
+    return message.parentAccountId();
+}
+
 /*
   RetrieveMessageRange
 */
@@ -570,6 +642,12 @@ QMailServiceAction* RetrieveMessageRange::serviceAction() const
     return _retrievalAction;
 }
 
+QMailAccountId RetrieveMessageRange::accountId() const
+{
+    QMailMessage message(_messageId);
+    return message.parentAccountId();
+}
+
 /*
   RetrieveMessages
 */
@@ -583,7 +661,7 @@ RetrieveMessages::RetrieveMessages(QMailRetrievalAction *retrievalAction,
 {
     QString idsList = idListToString(_messageIds);
     _description = QString("retrieve-messages:message-ids=%1").arg(idsList);
-    _type = EmailAction::Retrieve;
+    _type = EmailAction::RetrieveMessages;
 }
 
 RetrieveMessages::~RetrieveMessages()
@@ -598,6 +676,58 @@ void RetrieveMessages::execute()
 QMailServiceAction* RetrieveMessages::serviceAction() const
 {
     return _retrievalAction;
+}
+
+QMailMessageIdList RetrieveMessages::messageIds() const
+{
+    return _messageIds;
+}
+
+/*
+  SearchMessages
+*/
+SearchMessages::SearchMessages(QMailSearchAction *searchAction,
+                               const QMailMessageKey &filter, const QString &bodyText,
+                               QMailSearchAction::SearchSpecification spec, quint64 limit, bool searchBody, const QMailMessageSortKey &sort)
+    : EmailAction(spec == QMailSearchAction::Local ? false : true)
+    , _searchAction(searchAction)
+    , _filter(filter)
+    , _bodyText(bodyText)
+    , _spec(spec)
+    , _limit(limit)
+    , _sort(sort)
+    , _searchBody(searchBody)
+{
+    _description = QString("search-messages:body-text=%1").arg(bodyText);
+    _type = EmailAction::Search;
+}
+
+SearchMessages::~SearchMessages()
+{
+}
+
+void SearchMessages::execute()
+{
+    QString bodyText;
+    if (_searchBody) {
+        bodyText = _bodyText;
+    }
+    _searchAction->searchMessages(_filter, bodyText, _spec, _limit, _sort);
+}
+
+QMailServiceAction* SearchMessages::serviceAction() const
+{
+    return _searchAction;
+}
+
+bool SearchMessages::isRemote() const
+{
+    return (_spec == QMailSearchAction::Remote);
+}
+
+QString SearchMessages::searchText() const
+{
+    return _bodyText;
 }
 
 /*
@@ -624,6 +754,48 @@ void Synchronize::execute()
 QMailServiceAction* Synchronize::serviceAction() const
 {
     return _retrievalAction;
+}
+
+QMailAccountId Synchronize::accountId() const
+{
+    return _accountId;
+}
+
+/*
+    TransmitMessage
+*/
+TransmitMessage::TransmitMessage(QMailTransmitAction* transmitAction, const QMailMessageId &messageId)
+    : EmailAction()
+    , _transmitAction(transmitAction)
+    , _messageId(messageId)
+{
+    _description = QString("transmit-message:message-id=%1").arg(_messageId.toULongLong());
+    _type = EmailAction::Transmit;
+}
+
+TransmitMessage::~TransmitMessage()
+{
+}
+
+void TransmitMessage::execute()
+{
+    _transmitAction->transmitMessage(_messageId);
+}
+
+QMailServiceAction* TransmitMessage::serviceAction() const
+{
+    return _transmitAction;
+}
+
+QMailMessageId TransmitMessage::messageId() const
+{
+    return _messageId;
+}
+
+QMailAccountId TransmitMessage::accountId() const
+{
+    QMailMessageMetaData msg(_messageId);
+    return msg.parentAccountId();
 }
 
 /*
@@ -656,5 +828,3 @@ QMailAccountId TransmitMessages::accountId() const
 {
     return _accountId;
 }
-
-

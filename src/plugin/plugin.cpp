@@ -30,20 +30,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
  */
 
-#include <QtGlobal>
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-#include <QtQml>
-#include <QQmlEngine>
-#include <QQmlExtensionPlugin>
-#define QDeclarativeEngine QQmlEngine
-#define QDeclarativeExtensionPlugin QQmlExtensionPlugin
-#else
-#include <QtDeclarative>
-#include <QDeclarativeEngine>
-#include <QDeclarativeExtensionPlugin>
-#endif
-
 #include "folderlistmodel.h"
 #include "emailaccountlistmodel.h"
 #include "emailmessagelistmodel.h"
@@ -52,21 +38,28 @@
 #include "emailaccountsettingsmodel.h"
 #include "emailaccount.h"
 #include "emailfolder.h"
+#include "attachmentlistmodel.h"
+#include <QtGlobal>
+#include <QtQml>
+#include <QQmlEngine>
+#include <QQmlExtensionPlugin>
 
-class Q_DECL_EXPORT NemoEmailPlugin : public QDeclarativeExtensionPlugin
+class Q_DECL_EXPORT NemoEmailPlugin : public QQmlExtensionPlugin
 {
     Q_OBJECT
-    #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-        Q_PLUGIN_METADATA(IID "org.nemomobile.email")
-    #endif
+    Q_PLUGIN_METADATA(IID "org.nemomobile.email")
+
 public:
+    NemoEmailPlugin(){}
+
     virtual ~NemoEmailPlugin() {}
 
-    void initializeEngine(QDeclarativeEngine *engine, const char *uri)
+    void initializeEngine(QQmlEngine *engine, const char *uri)
     {
         Q_ASSERT(uri == QLatin1String("org.nemomobile.email"));
         Q_UNUSED(engine)
         Q_UNUSED(uri)
+        QLoggingCategory::setFilterRules(QStringLiteral("org.nemomobile.email.debug=false"));
     }
 
     void registerTypes(const char *uri)
@@ -81,10 +74,8 @@ public:
         qmlRegisterType<EmailAccountSettingsModel>(uri, 0, 1, "EmailAccountSettingsModel");
         qmlRegisterType<EmailAccount>(uri, 0, 1, "EmailAccount");
         qmlRegisterType<EmailFolder>(uri, 0, 1, "EmailFolder");
+        qmlRegisterType<AttachmentListModel>(uri, 0, 1, "AttachmentListModel");
     }
 };
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-    Q_EXPORT_PLUGIN2(nemoemail, NemoEmailPlugin)
-#endif
 
 #include "plugin.moc"

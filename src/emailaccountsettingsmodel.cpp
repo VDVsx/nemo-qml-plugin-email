@@ -10,6 +10,7 @@
 #include <qmailmessage.h>
 
 #include "emailaccountsettingsmodel.h"
+#include "emailagent.h"
 
 EmailAccountSettingsModel::EmailAccountSettingsModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -33,11 +34,6 @@ EmailAccountSettingsModel::EmailAccountSettingsModel(QObject *parent)
     roles[SendSecurityRole] = "sendSecurity";
     roles[SendUsernameRole] = "sendUsername";
     roles[SendPasswordRole] = "sendPassword";
-
-    roles[PresetRole] = "preset";
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-    setRoleNames(roles);
-#endif
 
     init();
 }
@@ -83,12 +79,10 @@ void EmailAccountSettingsModel::reload()
     endResetModel();
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 QHash<int, QByteArray> EmailAccountSettingsModel::roleNames() const
 {
     return roles;
 }
-#endif
 
 int EmailAccountSettingsModel::rowCount(const QModelIndex &parent) const
 {
@@ -110,7 +104,7 @@ QVariant EmailAccountSettingsModel::data(const QModelIndex &index, int role) con
         } else if (services.contains("pop3")) {
             recvsvc = "pop3";
         } else {
-            qWarning("EmailAccountSettingsModel::data: No IMAP or POP service found for account");
+            qCWarning(lcGeneral) << "EmailAccountSettingsModel::data: No IMAP or POP service found for account";
             return QVariant();
         }
         switch (role) {
@@ -191,9 +185,6 @@ QVariant EmailAccountSettingsModel::data(const QModelIndex &index, int role) con
             svccfg = mAccountConfigs[index.row()].serviceConfiguration("smtp");
             return QMailDecoder::decode(svccfg.value("smtppassword"));
             break;
-        case PresetRole:
-            return mAccounts[index.row()].customField("preset");
-            break;
         default:
             return QVariant();
         }
@@ -215,7 +206,7 @@ bool EmailAccountSettingsModel::setData(const QModelIndex &index, const QVariant
         } else if (services.contains("pop3")) {
             recvsvc = "pop3";
         } else {
-            qWarning("EmailAccountSettingsModel::setData: No IMAP or POP service found for account");
+            qCWarning(lcGeneral) << "EmailAccountSettingsModel::setData: No IMAP or POP service found for account";
             return false;
         }
         switch (role) {
@@ -324,8 +315,6 @@ bool EmailAccountSettingsModel::setData(const QModelIndex &index, const QVariant
             svccfg.setValue("smtppassword", QMailDecoder::encode(value.toString()));
             return true;
             break;
-        case PresetRole:
-            // setting preset not implemented here
         default:
             return false;
         }

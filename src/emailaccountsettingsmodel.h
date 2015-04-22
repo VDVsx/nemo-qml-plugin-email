@@ -14,8 +14,10 @@
 #include <qmailaccount.h>
 #include <qmailserviceconfiguration.h>
 
-class EmailAccountSettingsModel : public QAbstractListModel {
+class Q_DECL_EXPORT EmailAccountSettingsModel : public QAbstractListModel
+{
     Q_OBJECT
+
 public:
     enum AccountListRoles {
         DescriptionRole = Qt::UserRole + 1,
@@ -36,10 +38,9 @@ public:
         SendAuthRole,
         SendSecurityRole,
         SendUsernameRole,
-        SendPasswordRole,
-
-        PresetRole
+        SendPasswordRole
     };
+
     EmailAccountSettingsModel(QObject *parent = 0);
     Q_INVOKABLE void reload();
     Q_INVOKABLE int rowCount(const QModelIndex &parent = QModelIndex()) const;
@@ -63,10 +64,8 @@ public slots:
     void saveChanges();
     void deleteRow(int row);
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 protected:
     virtual QHash<int, QByteArray> roleNames() const;
-#endif
 
 private:
     QHash<int,QByteArray> roles;
